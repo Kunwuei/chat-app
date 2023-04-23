@@ -1,0 +1,16 @@
+# Rust build artifacts
+target/
+
+# Editor/IDE files
+.vscode/
+.idea/
+
+# Log files
+*.log
+*.log.*
+*.err
+*.out
+
+# Configuration files
+.env
+*.conf
