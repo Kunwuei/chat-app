@@ -1,12 +1,12 @@
 #[macro_use] extern crate rocket;
 
-use rocket::{tokio::sync::broadcast::{channel}};
+use rocket::{State, Shutdown};
+use rocket::fs::{relative, FileServer};
+use rocket::form::Form;
+use rocket::response::stream::{EventStream, Event};
 use rocket::serde::{Serialize, Deserialize};
-
-#[get("/world")]
-fn world() -> &'static str {
-    "Hello, world!"
-}
+use rocket::tokio::sync::broadcast::{channel, Sender, error::RecvError};
+use rocket::tokio::select;
 
 #[derive(Debug, Clone, FromForm, Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -19,11 +19,41 @@ struct Message {
     pub message: String,
 }
 // 1024 is the capacity of the channel, .0 is because we just want to store the first value in tupple, the sender
+
+#[post("/message", data = "<form>")]
+fn post(form: Form<Message>, queue: &State<Sender<Message>>) {
+    // A send 'fails' if there are no active subscribers. That's okay.
+    let _res = queue.send(form.into_inner());
+}
+
+#[get("/events")]
+async fn events(queue: &State<Sender<Message>>, mut end: Shutdown) -> EventStream![] {
+    let mut rx = queue.subscribe(); 
+
+    EventStream! {
+        loop {
+            let msg = select! {
+                msg = rx.recv() => match msg {
+                    Ok(msg) => msg, 
+                    Err(RecvError::Closed) => break,
+                    Err(RecvError::Lagged(_)) => continue,
+                },
+                _ = &mut end => break,
+            };
+
+         yield Event::json(&msg);
+        }
+    }
+}
+    
+
+
 #[launch]
 fn rocket() -> _ {
     rocket::build()
         .manage(channel::<Message>(1024).0)
-        .mount("/hello", routes![world])
+        .mount("/", routes![post, events])
+        .mount("/", FileServer::from(relative!("static")))
 }
 
 
